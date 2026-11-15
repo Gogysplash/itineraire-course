@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Itinéraire de course</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; font: 16px system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #map { flex: 1; }
+  #bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff;
+         padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  #km { font-size: 1.6rem; font-weight: 700; margin-right: auto; font-variant-numeric: tabular-nums; }
+  button { min-height: 44px; padding: 0 12px; font: inherit; border: 1px solid #999; border-radius: 8px; background: #f3f3f3; color: #111; }
+  #msg { width: 100%; margin: 0; color: #a40000; font-size: .9rem; }
+  #msg:empty { display: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="bar">
+  <output id="km" aria-live="polite">0,00 km</output>
+  <button id="undo">Annuler</button>
+  <button id="loop">Boucler</button>
+  <button id="clear">Effacer</button>
+  <button id="here">Ma position</button>
+  <p id="msg" role="status"></p>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem('run')) || {}; } catch {}
+
+// Un tronçon par point touché : p = le point, path = le tracé depuis le point précédent, d = mètres
+let legs = saved.legs || [];
+
+const map = L.map('map').setView(saved.center || [46.6, 2.4], saved.zoom || 6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+const line = L.polyline([], { color: '#e8352e', weight: 5 }).addTo(map);
+const dots = L.layerGroup().addTo(map);
+
+function save() {
+  try { localStorage.setItem('run', JSON.stringify({ legs, center: map.getCenter(), zoom: map.getZoom() })); } catch {}
+}
+
+function draw() {
+  line.setLatLngs(legs.flatMap(l => l.path));
+  dots.clearLayers();
+  legs.forEach((l, i) => L.circleMarker(l.p,
+    { radius: i ? 4 : 8, color: i ? '#e8352e' : '#1a8f3c', fillOpacity: 1, interactive: false }).addTo(dots));
+  $('km').textContent = (legs.reduce((s, l) => s + l.d, 0) / 1000).toFixed(2).replace('.', ',') + ' km';
+  save();
+}
+
+async function add(p) {
+  $('msg').textContent = '';
+  const prev = legs.at(-1);
+  let leg = { p, path: [p], d: 0 };
+  if (prev) {
+    try {
+      const r = await fetch('https://routing.openstreetmap.de/routed-foot/route/v1/foot/' +
+        `${prev.p[1]},${prev.p[0]};${p[1]},${p[0]}?overview=full&geometries=geojson`);
+      const route = (await r.json()).routes[0];
+      const path = route.geometry.coordinates.map(c => [c[1], c[0]]);
+      leg = { p: path.at(-1), path, d: route.distance };
+    } catch {
+      leg = { p, path: [prev.p, p], d: map.distance(prev.p, p) };
+      $('msg').textContent = 'Calcul du chemin indisponible : tronçon tracé en ligne droite.';
+    }
+  }
+  legs.push(leg);
+  draw();
+}
+
+// File d'attente : les touches rapides s'enchaînent dans l'ordre au lieu de se croiser
+let q = Promise.resolve();
+const then = f => { q = q.then(f); };
+
+map.on('click', e => then(() => add([e.latlng.lat, e.latlng.lng])));
+map.on('moveend', save);
+map.on('locationerror', () => { $('msg').textContent = 'Position indisponible (autorisez la localisation).'; });
+$('undo').onclick = () => then(() => { legs.pop(); draw(); });
+$('loop').onclick = () => then(() => legs.length > 1 && add(legs[0].p));
+$('clear').onclick = () => then(() => { legs = []; draw(); });
+$('here').onclick = () => map.locate({ setView: true, maxZoom: 16 });
+
+draw();
+</script>
+</body>
+</html>
