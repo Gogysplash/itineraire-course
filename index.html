@@ -86,7 +86,21 @@ map.on('locationerror', () => { $('msg').textContent = 'Position indisponible (a
 $('undo').onclick = () => then(() => { legs.pop(); draw(); });
 $('loop').onclick = () => then(() => legs.length > 1 && add(legs[0].p));
 $('clear').onclick = () => then(() => { legs = []; draw(); });
-$('here').onclick = () => map.locate({ setView: true, maxZoom: 16 });
+// Suivi en direct : point bleu mis à jour en continu, carte recentrée une fois par appui sur le bouton
+let me, center = false;
+map.on('locationfound', e => {
+  me = me || L.circleMarker(e.latlng,
+    { radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map);
+  me.setLatLng(e.latlng);
+  if (center) { center = false; map.setView(e.latlng, Math.max(map.getZoom(), 16)); }
+});
+$('here').onclick = () => {
+  center = true;
+  map.stopLocate();
+  map.locate({ watch: true, enableHighAccuracy: true });
+  // shortcut: le suivi s'arrête écran éteint (limite d'une page web) ; on empêche juste la mise en veille
+  navigator.wakeLock?.request('screen').catch(() => {});
+};
 
 draw();
 </script>
