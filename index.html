@@ -89,7 +89,7 @@ $('clear').onclick = () => then(() => { legs = []; draw(); });
 // Suivi en direct : point bleu mis à jour en continu, carte recentrée une fois par appui sur le bouton
 const cap = window.Capacitor?.nativeCallback && window.Capacitor; // présent seulement dans l'application Android
 const walked = L.polyline([], { color: '#1a73e8', weight: 3, opacity: .6 }).addTo(map); // chemin réellement parcouru
-let me, center = false, off = false, watching = false;
+let me, center = false, off = false, watching = false, denied = false;
 
 // Distance en mètres entre une position et le parcours tracé
 function offRoute(ll) {
@@ -118,14 +118,27 @@ function track() {
     if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 16));
     if (watching) return;
     watching = true;
-    cap.nativePromise('LocalNotifications', 'requestPermissions', {}).catch(() => {}); // Android 13+
-    cap.nativeCallback('BackgroundGeolocation', 'addWatcher', {
-      backgroundTitle: 'Itinéraire course', backgroundMessage: 'Suivi de ta position en cours.',
-      requestPermissions: true, stale: false, distanceFilter: 5,
-    }, (loc, err) => {
-      if (err || !loc) { $('msg').textContent = 'Position indisponible (autorisez la localisation).'; return; }
-      seen(L.latLng(loc.latitude, loc.longitude));
-    });
+    $('msg').textContent = 'Recherche du GPS…';
+    // Une demande d'autorisation à la fois : notifications (Android 13+), puis localisation
+    cap.nativePromise('LocalNotifications', 'requestPermissions', {}).catch(() => {}).then(() =>
+      cap.nativeCallback('BackgroundGeolocation', 'addWatcher', {
+        backgroundTitle: 'Itinéraire course', backgroundMessage: 'Suivi de ta position en cours.',
+        requestPermissions: true, stale: false, distanceFilter: 5,
+      }, (loc, err) => {
+        if (err || !loc) {
+          watching = false; // un nouvel appui sur le bouton relance la demande
+          const no = err?.code === 'NOT_AUTHORIZED';
+          // refus répété : Android n'affiche plus la demande, on ouvre les réglages de l'application
+          if (no && denied) cap.nativePromise('BackgroundGeolocation', 'openSettings', {}).catch(() => {});
+          denied = no;
+          $('msg').textContent = 'Position indisponible : ' + (no
+            ? 'autorise la localisation, puis retouche « Ma position ».'
+            : (err?.message || err?.code || 'erreur inconnue'));
+          return;
+        }
+        if (!me) $('msg').textContent = '';
+        seen(L.latLng(loc.latitude, loc.longitude));
+      }));
     return;
   }
   map.stopLocate();

@@ -15,11 +15,14 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
       - run: mkdir -p www && cp index.html www/ && npx cap add android
+      # shortcut: la clé de signature de test est gardée dans le cache du dépôt pour que les mises à jour
+      # s'installent par-dessus l'ancienne version ; si le cache expire (7 jours sans construction),
+      # il faudra désinstaller une fois. Vraie clé en secret à prévoir pour une diffusion sérieuse.
+      - uses: actions/cache@v4
+        with: { path: ~/.android/debug.keystore, key: debug-keystore }
       - run: chmod +x gradlew && ./gradlew assembleDebug
         working-directory: android
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk itineraire-course.apk
-      # shortcut: APK de test signé avec une clé recréée à chaque construction ;
-      # pour mettre à jour il faut désinstaller l'ancienne version. Clé fixe à prévoir si ça gêne.
       - run: |
           gh release delete apk --yes --cleanup-tag || true
           gh release create apk itineraire-course.apk --title "Application Android" --notes "Dernière version, construite automatiquement."
