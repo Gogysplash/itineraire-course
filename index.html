@@ -87,24 +87,56 @@ $('undo').onclick = () => then(() => { legs.pop(); draw(); });
 $('loop').onclick = () => then(() => legs.length > 1 && add(legs[0].p));
 $('clear').onclick = () => then(() => { legs = []; draw(); });
 // Suivi en direct : point bleu mis à jour en continu, carte recentrée une fois par appui sur le bouton
-let me, center = false;
-map.on('locationfound', e => {
-  me = me || L.circleMarker(e.latlng,
+const cap = window.Capacitor?.nativeCallback && window.Capacitor; // présent seulement dans l'application Android
+const walked = L.polyline([], { color: '#1a73e8', weight: 3, opacity: .6 }).addTo(map); // chemin réellement parcouru
+let me, center = false, off = false, watching = false;
+
+// Distance en mètres entre une position et le parcours tracé
+function offRoute(ll) {
+  const P = x => L.CRS.EPSG3857.project(L.latLng(x)), p = P(ll), pts = legs.flatMap(l => l.path).map(P);
+  let d = Infinity;
+  for (let i = 1; i < pts.length; i++) d = Math.min(d, L.LineUtil.pointToSegmentDistance(p, pts[i - 1], pts[i]));
+  return d * Math.cos(ll.lat * Math.PI / 180); // Mercator étire les distances de 1/cos(latitude)
+}
+
+function seen(ll) {
+  me = me || L.circleMarker(ll,
     { radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map);
-  me.setLatLng(e.latlng);
-  if (center) { center = false; map.setView(e.latlng, Math.max(map.getZoom(), 16)); }
-});
+  me.setLatLng(ll);
+  walked.addLatLng(ll);
+  if (center) { center = false; map.setView(ll, Math.max(map.getZoom(), 16)); }
+  const far = legs.length > 1 && offRoute(ll) > 50;
+  if (far && !off) cap?.nativePromise('LocalNotifications', 'schedule', { notifications: [
+    { id: 1, title: 'Hors parcours', body: "Tu t'écartes de ton itinéraire." }] }).catch(() => {});
+  off = far;
+}
+map.on('locationfound', e => seen(e.latlng));
+
 function track() {
   center = true;
+  if (cap) { // application : service GPS qui continue écran éteint
+    if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 16));
+    if (watching) return;
+    watching = true;
+    cap.nativePromise('LocalNotifications', 'requestPermissions', {}).catch(() => {}); // Android 13+
+    cap.nativeCallback('BackgroundGeolocation', 'addWatcher', {
+      backgroundTitle: 'Itinéraire course', backgroundMessage: 'Suivi de ta position en cours.',
+      requestPermissions: true, stale: false, distanceFilter: 5,
+    }, (loc, err) => {
+      if (err || !loc) { $('msg').textContent = 'Position indisponible (autorisez la localisation).'; return; }
+      seen(L.latLng(loc.latitude, loc.longitude));
+    });
+    return;
+  }
   map.stopLocate();
   map.locate({ watch: true, enableHighAccuracy: true });
   navigator.wakeLock?.request('screen').catch(() => {});
 }
 $('here').onclick = track;
-// shortcut: une page web ne peut pas suivre écran éteint ; on reprend dès qu'elle redevient visible.
-// Pour un vrai suivi en arrière-plan (alertes, trace enregistrée), il faut une application native.
+// Version web : une page ne peut pas suivre écran éteint, on reprend dès qu'elle redevient visible.
 document.addEventListener('visibilitychange', () => { if (!document.hidden && me) track(); });
-navigator.permissions?.query({ name: 'geolocation' })
+if (cap) track();
+else navigator.permissions?.query({ name: 'geolocation' })
   .then(s => { if (s.state === 'granted') track(); }).catch(() => {});
 
 draw();

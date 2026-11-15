@@ -1,0 +1,6 @@
+{
+  "appId": "io.github.gogysplash.itinerairecourse",
+  "appName": "Itinéraire course",
+  "webDir": "www",
+  "android": { "useLegacyBridge": true }
+}
