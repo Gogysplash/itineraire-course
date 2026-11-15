@@ -8,28 +8,59 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-  html, body { height: 100%; margin: 0; font: 16px system-ui, sans-serif; }
-  body { display: flex; flex-direction: column; }
-  #map { flex: 1; }
-  #bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff;
-         padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
-  #km { font-size: 1.6rem; font-weight: 700; margin-right: auto; font-variant-numeric: tabular-nums; }
-  #go { background: #1a8f3c; border-color: #1a8f3c; color: #fff; font-weight: 700; }
-  button { min-height: 44px; padding: 0 12px; font: inherit; border: 1px solid #999; border-radius: 8px; background: #f3f3f3; color: #111; }
-  #msg { width: 100%; margin: 0; color: #a40000; font-size: .9rem; }
+  /* Carte plein écran, panneau flottant arrondi en bas */
+  :root { --bg: rgba(255,255,255,.94); --fg: #14161a; --sub: #6b7280; --chip: #eceef2;
+          --accent: #ff4d2e; --primary: #14161a; --on-primary: #fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: rgba(24,26,31,.94); --fg: #f3f4f6; --sub: #9aa1ad; --chip: #2d3139;
+            --primary: #f3f4f6; --on-primary: #14161a; }
+  }
+  html, body { height: 100%; margin: 0; font: 16px system-ui, sans-serif; color: var(--fg); }
+  #map { position: absolute; inset: 0; background: #e9ecef; }
+  #bar { position: absolute; z-index: 1000; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+         max-width: 480px; margin: 0 auto; padding: 18px 16px 16px; border-radius: 26px; display: grid; gap: 12px;
+         background: var(--bg); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+         box-shadow: 0 10px 34px rgba(0,0,0,.2); }
+  #lbl { font-size: .78rem; font-weight: 600; color: var(--sub); letter-spacing: .06em; text-transform: uppercase; }
+  #km { display: block; font-size: 2.6rem; font-weight: 800; line-height: 1.1; letter-spacing: -.02em;
+        font-variant-numeric: tabular-nums; }
+  #km::after { content: ' km'; font-size: 1rem; font-weight: 600; letter-spacing: 0; color: var(--sub); }
+  #tools { display: flex; gap: 8px; }
+  #tools button { flex: 1; }
+  button { min-height: 48px; padding: 0 12px; border: 0; border-radius: 999px; font: inherit; font-weight: 600;
+           background: var(--chip); color: var(--fg); transition: transform .1s; }
+  button:active { transform: scale(.96); }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #go { min-height: 56px; font-size: 1.05rem; font-weight: 700; background: var(--primary); color: var(--on-primary); }
+  #go.stop { background: var(--accent); color: #fff; }
+  #here { position: absolute; right: 0; top: -64px; width: 52px; height: 52px; padding: 0; display: grid; place-items: center;
+          background: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+  #msg { margin: 0; font-size: .85rem; font-weight: 600; color: var(--accent); }
   #msg:empty { display: none; }
+  [hidden] { display: none !important; }
+  .leaflet-top { margin-top: env(safe-area-inset-top); }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="bar">
-  <output id="km" aria-live="polite">0,00 km</output>
-  <button id="undo">Annuler</button>
-  <button id="loop">Boucler</button>
-  <button id="clear">Effacer</button>
-  <button id="here">Ma position</button>
-  <button id="go">Démarrer</button>
+  <button id="here" aria-label="Ma position">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+    </svg>
+  </button>
+  <div>
+    <div id="lbl"></div>
+    <output id="km" aria-live="polite">0,00</output>
+  </div>
   <p id="msg" role="status"></p>
+  <div id="tools">
+    <button id="undo">Annuler</button>
+    <button id="loop">Boucler</button>
+    <button id="clear">Effacer</button>
+  </div>
+  <button id="go">Démarrer</button>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -39,10 +70,13 @@ try { saved = JSON.parse(localStorage.getItem('run')) || {}; } catch {}
 // Un tronçon par point touché : p = le point, path = le tracé depuis le point précédent, d = mètres
 let legs = saved.legs || [];
 
-const map = L.map('map').setView(saved.center || [46.6, 2.4], saved.zoom || 6);
+const map = L.map('map', { zoomControl: false }).setView(saved.center || [46.6, 2.4], saved.zoom || 6);
+map.attributionControl.setPosition('topright'); // le panneau du bas la cacherait
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
-const line = L.polyline([], { color: '#e8352e', weight: 5 }).addTo(map);
+const ACCENT = '#ff4d2e';
+const casing = L.polyline([], { color: '#fff', weight: 10 }).addTo(map); // liseré blanc sous le tracé
+const line = L.polyline([], { color: ACCENT, weight: 6 }).addTo(map);
 const dots = L.layerGroup().addTo(map);
 
 function save() {
@@ -50,10 +84,12 @@ function save() {
 }
 
 function draw() {
-  line.setLatLngs(legs.flatMap(l => l.path));
+  const path = legs.flatMap(l => l.path);
+  casing.setLatLngs(path);
+  line.setLatLngs(path);
   dots.clearLayers();
-  legs.forEach((l, i) => L.circleMarker(l.p,
-    { radius: i ? 4 : 8, color: i ? '#e8352e' : '#1a8f3c', fillOpacity: 1, interactive: false }).addTo(dots));
+  legs.forEach((l, i) => L.circleMarker(l.p, { radius: i ? 5 : 9, weight: 3, fillOpacity: 1, interactive: false,
+    color: i ? ACCENT : '#fff', fillColor: i ? '#fff' : '#16a34a' }).addTo(dots));
   show();
   save();
 }
@@ -61,7 +97,10 @@ function draw() {
 // Phase tracé : longueur du parcours. Phase course : distance courue / longueur du parcours.
 const fmt = m => (m / 1000).toFixed(2).replace('.', ',');
 function show() {
-  $('km').textContent = (running ? fmt(ran) + ' / ' : '') + fmt(legs.reduce((s, l) => s + l.d, 0)) + ' km';
+  const total = legs.reduce((s, l) => s + l.d, 0);
+  $('km').textContent = fmt(running ? ran : total);
+  $('lbl').textContent = running ? 'Couru · sur ' + fmt(total) + ' km'
+    : legs.length ? 'Parcours' : 'Touche la carte pour tracer';
 }
 
 async function add(p) {
@@ -98,7 +137,7 @@ $('clear').onclick = () => then(() => { legs = []; draw(); });
 // Deux phases : tracé (running = false, on touche la carte pour poser des points)
 // et course (running = true, la carte est verrouillée et suit la position).
 const cap = window.Capacitor?.nativeCallback && window.Capacitor; // présent seulement dans l'application Android
-const walked = L.polyline([], { color: '#1a73e8', weight: 3, opacity: .6 }).addTo(map); // chemin réellement parcouru
+const walked = L.polyline([], { color: '#1a73e8', weight: 4, opacity: .8 }).addTo(map); // chemin réellement parcouru
 let running = false, ran = 0, me, center = false, off = false, watchId = null, denied = false, searching = false, lock;
 
 // Distance en mètres entre une position et le parcours tracé
@@ -166,8 +205,9 @@ $('here').onclick = track;
 
 $('go').onclick = () => {
   running = !running;
-  for (const id of ['undo', 'loop', 'clear', 'here']) $(id).hidden = running;
+  $('tools').hidden = $('here').hidden = running;
   $('go').textContent = running ? 'Terminer' : 'Démarrer';
+  $('go').classList.toggle('stop', running);
   if (running) {
     ran = 0; off = false; walked.setLatLngs([]);
     track();
