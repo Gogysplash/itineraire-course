@@ -94,13 +94,18 @@ map.on('locationfound', e => {
   me.setLatLng(e.latlng);
   if (center) { center = false; map.setView(e.latlng, Math.max(map.getZoom(), 16)); }
 });
-$('here').onclick = () => {
+function track() {
   center = true;
   map.stopLocate();
   map.locate({ watch: true, enableHighAccuracy: true });
-  // shortcut: le suivi s'arrête écran éteint (limite d'une page web) ; on empêche juste la mise en veille
   navigator.wakeLock?.request('screen').catch(() => {});
-};
+}
+$('here').onclick = track;
+// shortcut: une page web ne peut pas suivre écran éteint ; on reprend dès qu'elle redevient visible.
+// Pour un vrai suivi en arrière-plan (alertes, trace enregistrée), il faut une application native.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && me) track(); });
+navigator.permissions?.query({ name: 'geolocation' })
+  .then(s => { if (s.state === 'granted') track(); }).catch(() => {});
 
 draw();
 </script>
