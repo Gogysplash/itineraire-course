@@ -34,7 +34,9 @@
            background: var(--chip); color: var(--fg); transition: transform .1s; }
   button:active { transform: scale(.96); }
   button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-  #go { min-height: 56px; font-size: 1.05rem; font-weight: 700; background: var(--primary); color: var(--on-primary); }
+  #actions { display: flex; gap: 8px; }
+  #pause { flex: 1; min-height: 56px; }
+  #go { flex: 2; min-height: 56px; font-size: 1.05rem; font-weight: 700; background: var(--primary); color: var(--on-primary); }
   #go.stop { background: var(--accent); color: #fff; }
   .fab { position: absolute; top: -64px; width: 52px; height: 52px; padding: 0; display: grid; place-items: center;
          background: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.2); }
@@ -103,7 +105,10 @@
     <button id="loop">Boucler</button>
     <button id="clear">Effacer</button>
   </div>
-  <button id="go">Démarrer</button>
+  <div id="actions">
+    <button id="pause" hidden>Pause</button>
+    <button id="go">Démarrer</button>
+  </div>
 </div>
 
 <dialog id="lib" aria-labelledby="libTitle">
@@ -136,9 +141,10 @@ const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); retu
 
 // Stockage local du téléphone :
 //   run    = tracé en cours { legs, center, zoom }
-//   routes = itinéraires enregistrés [{ name, d (m), legs }]
-//   runs   = courses faites [{ date (ms), d (m), t (s), splits [s par km], path [[lat, lng]] }]
-// Un tronçon (leg) par point posé : p = le point, path = le chemin depuis le point précédent, d = mètres
+//   routes = itinéraires enregistrés [{ name, d (m), up (m), legs }]
+//   runs   = courses faites [{ date (ms), d (m), t (s), up (m), splits [s par km], path [[lat, lng]] }]
+// Un tronçon (leg) par point posé : p = le point, path = le chemin depuis le point précédent,
+// d = mètres, up = dénivelé positif en mètres
 const saved = load('run', {});
 let legs = saved.legs || [], routes = load('routes', []), runs = load('runs', []);
 
@@ -162,13 +168,33 @@ const fmtT = s => { // 75 -> 1:15, 3675 -> 1:01:15
 };
 const pace = (s, m) => m < 20 ? '–' : fmtT(s / m * 1000) + ' /km';
 const total = () => legs.reduce((s, l) => s + l.d, 0);
+const totalUp = () => Math.round(legs.reduce((s, l) => s + (l.up || 0), 0));
+const upTxt = up => up == null ? '' : ` · D+ ${up} m`; // les anciennes courses n'ont pas de dénivelé
+
+// Dénivelé positif d'une suite d'altitudes, puis d'un chemin d'après le relief d'Open-Meteo.
+// shortcut: relief à mailles de ~90 m et 100 points au plus par chemin, donc valeur approchée ;
+// 0 si le service ne répond pas.
+const climb = alt => alt.reduce((s, v, i) => s + Math.max(0, i ? v - alt[i - 1] : 0), 0);
+async function gain(path) {
+  if (path.length < 2) return 0;
+  const n = Math.min(path.length, 100),
+    pts = Array.from({ length: n }, (_, i) => path[Math.round(i * (path.length - 1) / (n - 1))]);
+  try {
+    const r = await fetch('https://api.open-meteo.com/v1/elevation' +
+      `?latitude=${pts.map(p => p[0].toFixed(5))}&longitude=${pts.map(p => p[1].toFixed(5))}`);
+    return climb((await r.json()).elevation);
+  } catch { return 0; }
+}
 
 let running = false, ran = 0, t0 = 0, splits = [], samples = [], timer, off = false;
+let paused = false, pausedAt = 0, skip = false;
+const elapsed = () => ((paused ? pausedAt : Date.now()) - t0) / 1000; // secondes de course, pauses exclues
 
 function show() {
   $('km').textContent = fmt(running ? ran : total());
-  $('lbl').textContent = running ? (off ? 'Hors parcours · sur ' : 'Couru · sur ') + fmt(total()) + ' km'
-    : legs.length ? 'Parcours' : 'Touche la carte pour tracer';
+  $('lbl').textContent = running
+    ? (paused ? 'En pause · sur ' : off ? 'Hors parcours · sur ' : 'Couru · sur ') + fmt(total()) + ' km'
+    : legs.length ? 'Parcours' + upTxt(totalUp()) : 'Touche la carte pour tracer';
   $('bar').classList.toggle('off', running && off);
 }
 
@@ -199,7 +225,7 @@ async function leg(from, to) {
       `${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`);
     const route = (await r.json()).routes[0];
     const path = route.geometry.coordinates.map(c => [c[1], c[0]]);
-    return { p: path.at(-1), path, d: route.distance };
+    return { p: path.at(-1), path, d: route.distance, up: await gain(path) };
   } catch {
     $('msg').textContent = 'Calcul du chemin indisponible : tronçon tracé en ligne droite.';
     return { p: to, path: [from, to], d: map.distance(from, to) };
@@ -254,12 +280,14 @@ function seen(ll, accuracy = 0) {
     { radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map);
   me.setLatLng(ll);
   if (center || running) { center = false; map.setView(ll, Math.max(map.getZoom(), 16)); }
-  if (!running || accuracy > 35) return; // position trop imprécise pour compter dans la distance
-  const prev = walked.getLatLngs().at(-1), step = prev ? map.distance(prev, ll) : 0;
-  if (prev && step < 5) return; // tremblement du GPS à l'arrêt
+  if (!running || paused || accuracy > 35) return; // position trop imprécise pour compter dans la distance
+  // skip : premier point après une pause, le déplacement fait pendant la pause ne compte pas
+  const prev = walked.getLatLngs().at(-1), step = prev && !skip ? map.distance(prev, ll) : 0;
+  if (prev && !skip && step < 5) return; // tremblement du GPS à l'arrêt
+  skip = false;
   ran += step;
   walked.addLatLng(ll);
-  const t = (Date.now() - t0) / 1000;
+  const t = elapsed();
   samples.push([t, ran]);
   if (ran >= (splits.length + 1) * 1000) splits.push(Math.round(t - splits.reduce((a, b) => a + b, 0)));
   const far = legs.length > 1 && offRoute(ll) > 50;
@@ -273,12 +301,12 @@ map.on('locationfound', e => seen(e.latlng, e.accuracy));
 
 // Temps et allures, calculés à partir de l'heure réelle (les minuteries ralentissent écran éteint)
 function tick() {
-  const t = (Date.now() - t0) / 1000, now = samples.at(-1);
+  const t = elapsed(), now = samples.at(-1);
   $('time').textContent = fmtT(t);
   $('avg').textContent = pace(t, ran);
   // allure actuelle : sur les 30 dernières secondes, vide si on est à l'arrêt depuis 15 s
   const old = samples.findLast(s => s[0] <= now[0] - 30) || samples[0];
-  $('pace').textContent = t - now[0] < 15 ? pace(now[0] - old[0], now[1] - old[1]) : '–';
+  $('pace').textContent = !paused && t - now[0] < 15 ? pace(now[0] - old[0], now[1] - old[1]) : '–';
 }
 
 function stopTrack() {
@@ -325,12 +353,13 @@ const thin = pts => pts.reduce((o, p) => {
   return o;
 }, []);
 
-function finish() {
-  const t = Math.round((Date.now() - t0) / 1000);
-  if (ran < 50) { $('msg').textContent = 'Course trop courte : non enregistrée.'; return; }
-  runs.unshift({ date: Date.now(), d: Math.round(ran), t, splits, path: thin(walked.getLatLngs()) });
+async function finish() {
+  const run = { date: Date.now(), d: Math.round(ran), t: Math.round(elapsed()), splits, path: thin(walked.getLatLngs()) };
+  if (run.d < 50) { $('msg').textContent = 'Course trop courte : non enregistrée.'; return; }
+  run.up = Math.round(await gain(run.path));
+  runs.unshift(run);
   $('msg').textContent = store('runs', runs)
-    ? `Course enregistrée : ${fmt(ran)} km en ${fmtT(t)} (${pace(t, ran)}).`
+    ? `Course enregistrée : ${fmt(run.d)} km en ${fmtT(run.t)} (${pace(run.t, run.d)})${upTxt(run.up)}.`
     : "Mémoire pleine : course non enregistrée. Supprime d'anciennes courses dans l'historique.";
 }
 
@@ -338,7 +367,7 @@ $('go').onclick = () => {
   if (running && !confirm('Terminer la course ?')) return;
   running = !running;
   $('tools').hidden = $('here').hidden = $('menu').hidden = running;
-  $('stats').hidden = !running;
+  $('stats').hidden = $('pause').hidden = !running;
   $('go').textContent = running ? 'Terminer' : 'Démarrer';
   $('go').classList.toggle('stop', running);
   if (running) {
@@ -351,10 +380,20 @@ $('go').onclick = () => {
   } else {
     clearInterval(timer);
     stopTrack();
-    finish();
+    finish(); // lit le temps avant la remise à zéro de la pause ci-dessous
+    paused = false;
+    $('pause').textContent = 'Pause';
     lock?.release().catch(() => {});
   }
   draw(); // les points ne sont déplaçables qu'en dehors de la course
+};
+
+$('pause').onclick = () => {
+  if (paused) { t0 += Date.now() - pausedAt; skip = true; } else pausedAt = Date.now(); // le temps de pause est retiré
+  paused = !paused;
+  $('pause').textContent = paused ? 'Reprendre' : 'Pause';
+  show();
+  tick();
 };
 
 // ---------- Itinéraires enregistrés et historique ----------
@@ -372,14 +411,14 @@ function item(title, sub, onOpen, onDel) {
 function renderLib() {
   $('saveForm').hidden = legs.length < 2;
   $('libMsg').textContent = legs.length < 2 ? "Trace d'abord un itinéraire sur la carte pour pouvoir l'enregistrer." : '';
-  $('routes').replaceChildren(...routes.map((r, i) => item(r.name, fmt(r.d) + ' km',
+  $('routes').replaceChildren(...routes.map((r, i) => item(r.name, fmt(r.d) + ' km' + upTxt(r.up),
     () => { legs = structuredClone(r.legs); walked.setLatLngs([]); draw(); fit(line); },
     () => { routes.splice(i, 1); store('routes', routes); })));
   $('totals').textContent = runs.length
     ? `${runs.length} course${runs.length > 1 ? 's' : ''} · ${fmt(runs.reduce((s, r) => s + r.d, 0))} km au total` : '';
   $('runs').replaceChildren(...runs.map((r, i) => {
     const date = new Date(r.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-    const li = item(`${date} · ${fmt(r.d)} km`, `${fmtT(r.t)} · ${pace(r.t, r.d)}`,
+    const li = item(`${date} · ${fmt(r.d)} km`, `${fmtT(r.t)} · ${pace(r.t, r.d)}${upTxt(r.up)}`,
       () => { walked.setLatLngs(r.path); fit(walked); },
       () => { runs.splice(i, 1); store('runs', runs); });
     if (r.splits.length) {
@@ -405,7 +444,7 @@ $('saveForm').onsubmit = e => {
   e.preventDefault();
   const name = $('name').value.trim();
   if (!name) return;
-  routes = [{ name, d: total(), legs: structuredClone(legs) }, ...routes.filter(r => r.name !== name)]; // même nom = remplacement
+  routes = [{ name, d: total(), up: totalUp(), legs: structuredClone(legs) }, ...routes.filter(r => r.name !== name)]; // même nom = remplacement
   if (!store('routes', routes)) $('libMsg').textContent = 'Mémoire pleine : supprime des itinéraires ou des courses.';
   $('name').value = '';
   renderLib();
