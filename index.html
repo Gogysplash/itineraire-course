@@ -9,10 +9,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   /* Carte plein écran, panneau flottant arrondi en bas */
-  :root { --bg: rgba(255,255,255,.94); --fg: #14161a; --sub: #6b7280; --chip: #eceef2;
+  :root { --bg: rgba(255,255,255,.94); --panel: #fff; --fg: #14161a; --sub: #6b7280; --chip: #eceef2;
           --accent: #ff4d2e; --primary: #14161a; --on-primary: #fff; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: rgba(24,26,31,.94); --fg: #f3f4f6; --sub: #9aa1ad; --chip: #2d3139;
+    :root { --bg: rgba(24,26,31,.94); --panel: #181a1f; --fg: #f3f4f6; --sub: #9aa1ad; --chip: #2d3139;
             --primary: #f3f4f6; --on-primary: #14161a; }
   }
   html, body { height: 100%; margin: 0; font: 16px system-ui, sans-serif; color: var(--fg); }
@@ -21,31 +21,69 @@
          max-width: 480px; margin: 0 auto; padding: 18px 16px 16px; border-radius: 26px; display: grid; gap: 12px;
          background: var(--bg); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
          box-shadow: 0 10px 34px rgba(0,0,0,.2); }
-  #lbl { font-size: .78rem; font-weight: 600; color: var(--sub); letter-spacing: .06em; text-transform: uppercase; }
+  #lbl, dt { font-size: .78rem; font-weight: 600; color: var(--sub); letter-spacing: .06em; text-transform: uppercase; }
+  #bar.off #lbl { color: var(--accent); }
   #km { display: block; font-size: 2.6rem; font-weight: 800; line-height: 1.1; letter-spacing: -.02em;
         font-variant-numeric: tabular-nums; }
   #km::after { content: ' km'; font-size: 1rem; font-weight: 600; letter-spacing: 0; color: var(--sub); }
+  #stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+  dd { margin: 2px 0 0; font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
   #tools { display: flex; gap: 8px; }
   #tools button { flex: 1; }
   button { min-height: 48px; padding: 0 12px; border: 0; border-radius: 999px; font: inherit; font-weight: 600;
            background: var(--chip); color: var(--fg); transition: transform .1s; }
   button:active { transform: scale(.96); }
-  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   #go { min-height: 56px; font-size: 1.05rem; font-weight: 700; background: var(--primary); color: var(--on-primary); }
   #go.stop { background: var(--accent); color: #fff; }
-  #here { position: absolute; right: 0; top: -64px; width: 52px; height: 52px; padding: 0; display: grid; place-items: center;
-          background: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.2); }
-  #msg { margin: 0; font-size: .85rem; font-weight: 600; color: var(--accent); }
-  #msg:empty { display: none; }
+  .fab { position: absolute; top: -64px; width: 52px; height: 52px; padding: 0; display: grid; place-items: center;
+         background: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+  #here { right: 0; }
+  #menu { left: 0; }
+  #msg, #libMsg { margin: 0; font-size: .85rem; font-weight: 600; color: var(--accent); }
+  #msg:empty, #libMsg:empty { display: none; }
   [hidden] { display: none !important; }
   .leaflet-top { margin-top: env(safe-area-inset-top); }
+
+  /* Points du tracé : zone tactile de 32 px, pastille visible plus petite */
+  .pt::after { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: #fff;
+               border: 3px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .pt.start::after { inset: 5px; background: #16a34a; border-color: #fff; }
+  .leaflet-popup-content { margin: 8px; }
+
+  /* Fenêtre « Mes parcours » */
+  dialog { box-sizing: border-box; width: min(480px, calc(100% - 24px)); max-height: 82%; padding: 16px; border: 0;
+           border-radius: 26px; background: var(--panel); color: var(--fg); box-shadow: 0 10px 34px rgba(0,0,0,.3); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog header, #tabs, #saveForm, li { display: flex; gap: 8px; align-items: center; }
+  h2 { flex: 1; margin: 0; font-size: 1.3rem; }
+  #tabs { margin: 12px 0; }
+  #tabs button { flex: 1; }
+  #tabs button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+  input { flex: 1; min-width: 0; min-height: 48px; box-sizing: border-box; padding: 0 16px; border: 0; border-radius: 999px;
+          font: inherit; background: var(--chip); color: var(--fg); }
+  ul { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+  ul:empty::after { content: attr(data-empty); color: var(--sub); }
+  li { flex-wrap: wrap; }
+  .item { flex: 1; min-width: 0; padding: 10px 16px; border-radius: 16px; text-align: left; }
+  .item small, #totals, details { display: block; color: var(--sub); font-weight: 500; font-size: .85rem; }
+  .del { width: 48px; padding: 0; }
+  details { width: 100%; padding: 0 16px; }
+  summary { min-height: 32px; cursor: pointer; }
+  details ol { margin: 4px 0 8px; padding-left: 24px; font-variant-numeric: tabular-nums; }
+  #totals { margin: 0; }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="bar">
-  <button id="here" aria-label="Ma position">
+  <button id="menu" class="fab" aria-label="Mes itinéraires et mon historique">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16"/>
+    </svg>
+  </button>
+  <button id="here" class="fab" aria-label="Ma position">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
     </svg>
@@ -54,6 +92,11 @@
     <div id="lbl"></div>
     <output id="km" aria-live="polite">0,00</output>
   </div>
+  <dl id="stats" hidden>
+    <div><dt>Temps</dt><dd id="time">0:00</dd></div>
+    <div><dt>Allure moy.</dt><dd id="avg">–</dd></div>
+    <div><dt>Allure</dt><dd id="pace">–</dd></div>
+  </dl>
   <p id="msg" role="status"></p>
   <div id="tools">
     <button id="undo">Annuler</button>
@@ -62,13 +105,42 @@
   </div>
   <button id="go">Démarrer</button>
 </div>
+
+<dialog id="lib" aria-labelledby="libTitle">
+  <header>
+    <h2 id="libTitle">Mes parcours</h2>
+    <button id="close" class="del" aria-label="Fermer">✕</button>
+  </header>
+  <div id="tabs">
+    <button id="tabRoutes" aria-pressed="true">Itinéraires</button>
+    <button id="tabRuns" aria-pressed="false">Historique</button>
+  </div>
+  <section id="routesPane">
+    <form id="saveForm">
+      <input id="name" aria-label="Nom de l'itinéraire" placeholder="Nom de l'itinéraire" required maxlength="40" autocomplete="off">
+      <button>Enregistrer</button>
+    </form>
+    <p id="libMsg" role="status"></p>
+    <ul id="routes" data-empty="Aucun itinéraire enregistré."></ul>
+  </section>
+  <section id="runsPane" hidden>
+    <p id="totals"></p>
+    <ul id="runs" data-empty="Aucune course pour l'instant. Touche « Démarrer » pour en lancer une."></ul>
+  </section>
+</dialog>
+
 <script>
 const $ = id => document.getElementById(id);
-let saved = {};
-try { saved = JSON.parse(localStorage.getItem('run')) || {}; } catch {}
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 
-// Un tronçon par point touché : p = le point, path = le tracé depuis le point précédent, d = mètres
-let legs = saved.legs || [];
+// Stockage local du téléphone :
+//   run    = tracé en cours { legs, center, zoom }
+//   routes = itinéraires enregistrés [{ name, d (m), legs }]
+//   runs   = courses faites [{ date (ms), d (m), t (s), splits [s par km], path [[lat, lng]] }]
+// Un tronçon (leg) par point posé : p = le point, path = le chemin depuis le point précédent, d = mètres
+const saved = load('run', {});
+let legs = saved.legs || [], routes = load('routes', []), runs = load('runs', []);
 
 const map = L.map('map', { zoomControl: false }).setView(saved.center || [46.6, 2.4], saved.zoom || 6);
 map.attributionControl.setPosition('topright'); // le panneau du bas la cacherait
@@ -77,10 +149,27 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
 const ACCENT = '#ff4d2e';
 const casing = L.polyline([], { color: '#fff', weight: 10 }).addTo(map); // liseré blanc sous le tracé
 const line = L.polyline([], { color: ACCENT, weight: 6 }).addTo(map);
+const walked = L.polyline([], { color: '#1a73e8', weight: 4, opacity: .8 }).addTo(map); // chemin réellement couru
 const dots = L.layerGroup().addTo(map);
+const fit = layer => layer.getLatLngs().length &&
+  map.fitBounds(layer.getBounds(), { paddingTopLeft: [30, 30], paddingBottomRight: [30, 280] }); // 280 = panneau du bas
 
-function save() {
-  try { localStorage.setItem('run', JSON.stringify({ legs, center: map.getCenter(), zoom: map.getZoom() })); } catch {}
+const fmt = m => (m / 1000).toFixed(2).replace('.', ',');
+const fmtT = s => { // 75 -> 1:15, 3675 -> 1:01:15
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+};
+const pace = (s, m) => m < 20 ? '–' : fmtT(s / m * 1000) + ' /km';
+const total = () => legs.reduce((s, l) => s + l.d, 0);
+
+let running = false, ran = 0, t0 = 0, splits = [], samples = [], timer, off = false;
+
+function show() {
+  $('km').textContent = fmt(running ? ran : total());
+  $('lbl').textContent = running ? (off ? 'Hors parcours · sur ' : 'Couru · sur ') + fmt(total()) + ' km'
+    : legs.length ? 'Parcours' : 'Touche la carte pour tracer';
+  $('bar').classList.toggle('off', running && off);
 }
 
 function draw() {
@@ -88,57 +177,68 @@ function draw() {
   casing.setLatLngs(path);
   line.setLatLngs(path);
   dots.clearLayers();
-  legs.forEach((l, i) => L.circleMarker(l.p, { radius: i ? 5 : 9, weight: 3, fillOpacity: 1, interactive: false,
-    color: i ? ACCENT : '#fff', fillColor: i ? '#fff' : '#16a34a' }).addTo(dots));
+  legs.forEach((l, i) => {
+    // Hors course : glisser un point le déplace, le toucher propose de le supprimer
+    const m = L.marker(l.p, { draggable: !running, interactive: !running, keyboard: false,
+      icon: L.divIcon({ className: i ? 'pt' : 'pt start', iconSize: [32, 32] }) }).addTo(dots);
+    m.on('dragend', () => then(() => edit(i, [m.getLatLng().lat, m.getLatLng().lng])));
+    const b = document.createElement('button');
+    b.textContent = 'Supprimer ce point';
+    b.onclick = () => { map.closePopup(); then(() => edit(i)); };
+    m.bindPopup(b, { closeButton: false });
+  });
   show();
-  save();
+  store('run', { legs, center: map.getCenter(), zoom: map.getZoom() });
 }
 
-// Phase tracé : longueur du parcours. Phase course : distance courue / longueur du parcours.
-const fmt = m => (m / 1000).toFixed(2).replace('.', ',');
-function show() {
-  const total = legs.reduce((s, l) => s + l.d, 0);
-  $('km').textContent = fmt(running ? ran : total);
-  $('lbl').textContent = running ? 'Couru · sur ' + fmt(total) + ' km'
-    : legs.length ? 'Parcours' : 'Touche la carte pour tracer';
+// Chemin piéton entre deux points ; ligne droite si le service ne répond pas
+async function leg(from, to) {
+  if (!from) return { p: to, path: [to], d: 0 };
+  try {
+    const r = await fetch('https://routing.openstreetmap.de/routed-foot/route/v1/foot/' +
+      `${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`);
+    const route = (await r.json()).routes[0];
+    const path = route.geometry.coordinates.map(c => [c[1], c[0]]);
+    return { p: path.at(-1), path, d: route.distance };
+  } catch {
+    $('msg').textContent = 'Calcul du chemin indisponible : tronçon tracé en ligne droite.';
+    return { p: to, path: [from, to], d: map.distance(from, to) };
+  }
 }
 
 async function add(p) {
   $('msg').textContent = '';
-  const prev = legs.at(-1);
-  let leg = { p, path: [p], d: 0 };
-  if (prev) {
-    try {
-      const r = await fetch('https://routing.openstreetmap.de/routed-foot/route/v1/foot/' +
-        `${prev.p[1]},${prev.p[0]};${p[1]},${p[0]}?overview=full&geometries=geojson`);
-      const route = (await r.json()).routes[0];
-      const path = route.geometry.coordinates.map(c => [c[1], c[0]]);
-      leg = { p: path.at(-1), path, d: route.distance };
-    } catch {
-      leg = { p, path: [prev.p, p], d: map.distance(prev.p, p) };
-      $('msg').textContent = 'Calcul du chemin indisponible : tronçon tracé en ligne droite.';
-    }
-  }
-  legs.push(leg);
+  legs.push(await leg(legs.at(-1)?.p, p));
   draw();
 }
 
-// File d'attente : les touches rapides s'enchaînent dans l'ordre au lieu de se croiser
+// Déplace le point i vers p, ou le supprime si p est absent ; seuls les tronçons voisins sont recalculés
+async function edit(i, p) {
+  $('msg').textContent = '';
+  if (p) legs[i] = await leg(legs[i - 1]?.p, p); else legs.splice(i, 1);
+  const n = p ? i + 1 : i;
+  if (legs[n]) legs[n] = await leg(legs[n - 1]?.p, legs[n].p);
+  draw();
+}
+
+// File d'attente : les actions rapides s'enchaînent dans l'ordre au lieu de se croiser
 let q = Promise.resolve();
 const then = f => { q = q.then(f); };
 
-map.on('click', e => { if (!running) then(() => add([e.latlng.lat, e.latlng.lng])); });
-map.on('moveend', save);
+let popupClosed = 0; // toucher la carte pour fermer une bulle ne doit pas poser un point
+map.on('popupclose', () => { popupClosed = Date.now(); });
+map.on('click', e => {
+  if (!running && Date.now() - popupClosed > 300) then(() => add([e.latlng.lat, e.latlng.lng]));
+});
+map.on('moveend', () => store('run', { legs, center: map.getCenter(), zoom: map.getZoom() }));
 map.on('locationerror', () => { $('msg').textContent = 'Position indisponible (autorisez la localisation).'; });
 $('undo').onclick = () => then(() => { legs.pop(); draw(); });
 $('loop').onclick = () => then(() => legs.length > 1 && add(legs[0].p));
-$('clear').onclick = () => then(() => { legs = []; draw(); });
+$('clear').onclick = () => then(() => { legs = []; walked.setLatLngs([]); draw(); });
 
-// Deux phases : tracé (running = false, on touche la carte pour poser des points)
-// et course (running = true, la carte est verrouillée et suit la position).
+// ---------- Position et course ----------
 const cap = window.Capacitor?.nativeCallback && window.Capacitor; // présent seulement dans l'application Android
-const walked = L.polyline([], { color: '#1a73e8', weight: 4, opacity: .8 }).addTo(map); // chemin réellement parcouru
-let running = false, ran = 0, me, center = false, off = false, watchId = null, denied = false, searching = false, lock;
+let me, center = false, watchId = null, denied = false, searching = false, lock;
 
 // Distance en mètres entre une position et le parcours tracé
 function offRoute(ll) {
@@ -148,23 +248,38 @@ function offRoute(ll) {
   return d * Math.cos(ll.lat * Math.PI / 180); // Mercator étire les distances de 1/cos(latitude)
 }
 
-function seen(ll) {
+function seen(ll, accuracy = 0) {
   if (searching) { searching = false; $('msg').textContent = ''; }
   me = me || L.circleMarker(ll,
     { radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map);
   me.setLatLng(ll);
   if (center || running) { center = false; map.setView(ll, Math.max(map.getZoom(), 16)); }
-  if (!running) return;
-  const prev = walked.getLatLngs().at(-1);
-  if (prev) ran += map.distance(prev, ll);
+  if (!running || accuracy > 35) return; // position trop imprécise pour compter dans la distance
+  const prev = walked.getLatLngs().at(-1), step = prev ? map.distance(prev, ll) : 0;
+  if (prev && step < 5) return; // tremblement du GPS à l'arrêt
+  ran += step;
   walked.addLatLng(ll);
-  show();
+  const t = (Date.now() - t0) / 1000;
+  samples.push([t, ran]);
+  if (ran >= (splits.length + 1) * 1000) splits.push(Math.round(t - splits.reduce((a, b) => a + b, 0)));
   const far = legs.length > 1 && offRoute(ll) > 50;
   if (far && !off) cap?.nativePromise('LocalNotifications', 'schedule', { notifications: [
     { id: 1, title: 'Hors parcours', body: "Tu t'écartes de ton itinéraire." }] }).catch(() => {});
   off = far;
+  show();
+  tick();
 }
-map.on('locationfound', e => seen(e.latlng));
+map.on('locationfound', e => seen(e.latlng, e.accuracy));
+
+// Temps et allures, calculés à partir de l'heure réelle (les minuteries ralentissent écran éteint)
+function tick() {
+  const t = (Date.now() - t0) / 1000, now = samples.at(-1);
+  $('time').textContent = fmtT(t);
+  $('avg').textContent = pace(t, ran);
+  // allure actuelle : sur les 30 dernières secondes, vide si on est à l'arrêt depuis 15 s
+  const old = samples.findLast(s => s[0] <= now[0] - 30) || samples[0];
+  $('pace').textContent = t - now[0] < 15 ? pace(now[0] - old[0], now[1] - old[1]) : '–';
+}
 
 function stopTrack() {
   if (!cap) return map.stopLocate();
@@ -197,26 +312,103 @@ function track() {
             : (err?.message || err?.code || 'erreur inconnue'));
           return;
         }
-        seen(L.latLng(loc.latitude, loc.longitude));
+        seen(L.latLng(loc.latitude, loc.longitude), loc.accuracy);
       });
     });
 }
 $('here').onclick = track;
 
+// shortcut: trace allégée (un point tous les 15 m) pour tenir dans les ~5 Mo du stockage local,
+// soit quelques centaines de courses ; passer à un vrai fichier ou une base si ça ne suffit plus.
+const thin = pts => pts.reduce((o, p) => {
+  if (!o.length || map.distance(o.at(-1), p) >= 15) o.push([+p.lat.toFixed(5), +p.lng.toFixed(5)]);
+  return o;
+}, []);
+
+function finish() {
+  const t = Math.round((Date.now() - t0) / 1000);
+  if (ran < 50) { $('msg').textContent = 'Course trop courte : non enregistrée.'; return; }
+  runs.unshift({ date: Date.now(), d: Math.round(ran), t, splits, path: thin(walked.getLatLngs()) });
+  $('msg').textContent = store('runs', runs)
+    ? `Course enregistrée : ${fmt(ran)} km en ${fmtT(t)} (${pace(t, ran)}).`
+    : "Mémoire pleine : course non enregistrée. Supprime d'anciennes courses dans l'historique.";
+}
+
 $('go').onclick = () => {
+  if (running && !confirm('Terminer la course ?')) return;
   running = !running;
-  $('tools').hidden = $('here').hidden = running;
+  $('tools').hidden = $('here').hidden = $('menu').hidden = running;
+  $('stats').hidden = !running;
   $('go').textContent = running ? 'Terminer' : 'Démarrer';
   $('go').classList.toggle('stop', running);
   if (running) {
-    ran = 0; off = false; walked.setLatLngs([]);
+    ran = 0; off = false; splits = []; samples = [[0, 0]]; t0 = Date.now();
+    walked.setLatLngs([]);
     track();
+    timer = setInterval(tick, 1000);
+    tick();
     navigator.wakeLock?.request('screen').then(l => { lock = l; }).catch(() => {});
   } else {
+    clearInterval(timer);
     stopTrack();
+    finish();
     lock?.release().catch(() => {});
   }
-  show();
+  draw(); // les points ne sont déplaçables qu'en dehors de la course
+};
+
+// ---------- Itinéraires enregistrés et historique ----------
+function item(title, sub, onOpen, onDel) {
+  const li = document.createElement('li'), open = document.createElement('button'),
+    small = document.createElement('small'), del = document.createElement('button');
+  open.className = 'item'; open.textContent = title; small.textContent = sub; open.append(small);
+  open.onclick = () => { onOpen(); $('lib').close(); };
+  del.className = 'del'; del.textContent = '✕'; del.setAttribute('aria-label', 'Supprimer ' + title);
+  del.onclick = () => { if (confirm(`Supprimer « ${title} » ?`)) { onDel(); renderLib(); } };
+  li.append(open, del);
+  return li;
+}
+
+function renderLib() {
+  $('saveForm').hidden = legs.length < 2;
+  $('libMsg').textContent = legs.length < 2 ? "Trace d'abord un itinéraire sur la carte pour pouvoir l'enregistrer." : '';
+  $('routes').replaceChildren(...routes.map((r, i) => item(r.name, fmt(r.d) + ' km',
+    () => { legs = structuredClone(r.legs); walked.setLatLngs([]); draw(); fit(line); },
+    () => { routes.splice(i, 1); store('routes', routes); })));
+  $('totals').textContent = runs.length
+    ? `${runs.length} course${runs.length > 1 ? 's' : ''} · ${fmt(runs.reduce((s, r) => s + r.d, 0))} km au total` : '';
+  $('runs').replaceChildren(...runs.map((r, i) => {
+    const date = new Date(r.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const li = item(`${date} · ${fmt(r.d)} km`, `${fmtT(r.t)} · ${pace(r.t, r.d)}`,
+      () => { walked.setLatLngs(r.path); fit(walked); },
+      () => { runs.splice(i, 1); store('runs', runs); });
+    if (r.splits.length) {
+      const d = document.createElement('details'), s = document.createElement('summary'), ol = document.createElement('ol');
+      s.textContent = 'Allure par kilomètre';
+      ol.append(...r.splits.map(sec => Object.assign(document.createElement('li'), { textContent: fmtT(sec) + ' /km' })));
+      d.append(s, ol);
+      li.append(d);
+    }
+    return li;
+  }));
+}
+
+function tab(showRuns) {
+  $('routesPane').hidden = showRuns; $('runsPane').hidden = !showRuns;
+  $('tabRoutes').setAttribute('aria-pressed', !showRuns); $('tabRuns').setAttribute('aria-pressed', showRuns);
+}
+$('tabRoutes').onclick = () => tab(false);
+$('tabRuns').onclick = () => tab(true);
+$('menu').onclick = () => { renderLib(); $('lib').showModal(); };
+$('close').onclick = () => $('lib').close();
+$('saveForm').onsubmit = e => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  if (!name) return;
+  routes = [{ name, d: total(), legs: structuredClone(legs) }, ...routes.filter(r => r.name !== name)]; // même nom = remplacement
+  if (!store('routes', routes)) $('libMsg').textContent = 'Mémoire pleine : supprime des itinéraires ou des courses.';
+  $('name').value = '';
+  renderLib();
 };
 
 // Version web : une page ne peut pas suivre écran éteint, on reprend dès qu'elle redevient visible.
